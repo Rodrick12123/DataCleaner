@@ -2,7 +2,7 @@ from CleanerTypes.csv_cleaner import CSVCleaner
 
 def main():
     # Specify the path to your file
-    file_path = 'path/to/your/data.csv'
+    file_path = '"example_data.csv"'
 
     
     # Create an instance of CSVCleaner

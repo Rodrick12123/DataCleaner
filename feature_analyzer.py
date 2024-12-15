@@ -1,9 +1,9 @@
 import pandas as pd
 import re
 
-class FeatureAnalyzer:
+class CSVFeatureAnalyzer:
 
-    def check_constant_features(self, data):
+    def feature_has_constant_values(self, data):
         """Check for constant features with only one unique value."""
         return len(data.unique()) <= 1
 
@@ -22,10 +22,6 @@ class FeatureAnalyzer:
         common_placeholders = ["unknown", "n/a", "none", "placeholder"]
         return data.astype(str).str.lower().isin(common_placeholders).mean() > 0.5
 
-    def check_identifiers(self, data):
-        """Check for unique identifiers or IDs."""
-        return len(data.unique()) == len(data)
-
     def check_date_or_timestamp(self, data):
         """Check for features containing date or timestamp-like data."""
         try:
@@ -34,7 +30,7 @@ class FeatureAnalyzer:
         except (ValueError, TypeError):
             return False
 
-    def check_redundant_features(self, data, other_columns):
+    def feature_is_redundant(self, data, other_columns):
         """Check for redundancy by comparing with other columns."""
         return any(data.equals(self.data[col]) for col in other_columns if col != data.name)
 
@@ -45,11 +41,9 @@ class FeatureAnalyzer:
 
 
 
-    def csv_feature_is_phone_number(self, data,sample_fraction=0.2):
+    def feature_is_phone_number(self, data):
         """Identify columns that may contain phone numbers."""
 
-        if len(data) > 1e5:  # Arbitrary threshold for large datasets
-            data = data.sample(frac=sample_fraction, random_state=42)
 
         # Check if column contains mostly numeric data or has phone-like patterns
         if data.dtype == 'object' or pd.api.types.is_numeric_dtype(data):
@@ -58,7 +52,7 @@ class FeatureAnalyzer:
             return match_count / len(data) > 0.8  # Threshold: 80% matches indicate phone numbers
         return False
 
-    def csv_feature_is_zip_codes(self, data, sample_fraction=0.2):
+    def feature_is_zip_codes(self, data):
         """
         Enhanced ZIP code check for large datasets.
         Parameters:
@@ -66,10 +60,6 @@ class FeatureAnalyzer:
             - sample_fraction: Fraction of data to sample for large datasets
             - max_unique_ratio: Maximum ratio of unique values to total values
         """
-        # For very large datasets, sample data
-        if len(data) > 1e5:  # Arbitrary threshold for large datasets
-            data = data.sample(frac=sample_fraction, random_state=42)
-
         if pd.api.types.is_numeric_dtype(data):
             # Check numeric range for typical ZIP codes
             within_range = (data >= 1000) & (data <= 99999)
@@ -94,7 +84,7 @@ class FeatureAnalyzer:
         return False
 
 
-    def csv_feature_is_unique_Id(self, data, uniqueness_threshold=0.9, duplicate_threshold=0.1):
+    def feature_is_unique_Id(self, data, uniqueness_threshold=0.9, duplicate_threshold=0.1):
         """
         Identify columns that are likely to be IDs or unique identifiers.
 
@@ -106,10 +96,6 @@ class FeatureAnalyzer:
         Returns:
             list: Columns identified as potential IDs.
         """
-        
-        # for very large datasets, sample data
-        if len(data) > 1e5:  # Arbitrary threshold for large datasets
-            data = data.sample(frac=.2, random_state=42)
             
         # Calculate the proportion of unique values
         unique_ratio = data.nunique() / len(data)
