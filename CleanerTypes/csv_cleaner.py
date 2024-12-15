@@ -1,5 +1,6 @@
 import pandas as pd
 import os
+from feature_analyzer import FeatureAnalyzer 
 
 class CSVCleaner:
     def __init__(self, file_path):
@@ -31,13 +32,15 @@ class CSVCleaner:
         return data
     
     #Check to see if the data includes information that is not helpful such as IDs
-    #Consider all dtypes
-    #Returns True if the data is non_informative
     def non_informative_categorical_feature(data):
+        """
+        Consider all dtypes
+        Returns True if the data is non_informative
+        """
         
         return True
     
-    def get_irrelevant_features(self, threshold=0.01, constants=True, irrelevant_categories=True, outliers=False):
+    def get_irrelevant_features(self, constants=True, non_informative_categories=True, outliers=False):
         """
         Identify irrelevant features based on variance and constant values.
 
@@ -70,15 +73,17 @@ class CSVCleaner:
             data = self.data[column]
 
             #check for non-informative categorical features (IDs/unique identifiers)
-            if irrelevant_categories:
-                pass
+            if non_informative_categories and self.non_informative_categorical_feature(data):
+                irrelevant_features.append(column)
+                continue
 
             if outliers:
                 pass
 
             # Check for constant features
-            if data.nunique() <= 1 and constants:
+            if FeatureAnalyzer.check_constant_features(data) and constants:
                 irrelevant_features.append(column)
+                continue
             
             
 
@@ -89,6 +94,7 @@ class CSVCleaner:
         return irrelevant_features
     
     #Calls get_irrelevant_features to create a list of irrelevant features -> removes all features(columns) in list from data
+    #Check to see if percentage of removed columns are to high and act
     def remove_irrelevant_features(self):
         pass
 
