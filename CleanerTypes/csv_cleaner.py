@@ -44,11 +44,10 @@ class CSVCleaner:
             #check for correct dtypes
             self.feature_object_to_numeric_fillna(column)
 
-            if(self.is_irrelevant_features()):
+            if(self.is_irrelevant_features(column)):
                 irrelevant_features.append(column)
                 continue
-            
-        
+
          # Call remove features on irrelevant_features
         if len(irrelevant_features) > 0:
             if self.init_number_cols > 0:
@@ -114,30 +113,40 @@ class CSVCleaner:
 
         Returns True if the data is non_informative
         """
+        if(CSVFeatureAnalyzer.feature_is_phone_number(data)):
+            return True
+        
+        if(CSVFeatureAnalyzer.feature_is_zip_codes(data)):
+            return True
+        
+        if(CSVFeatureAnalyzer.feature_is_unique_Id(data)):
+            return True
         
         return True
     
+    #ToDo
     def is_irrelevant_features(self, column, sample_fraction=.2, constants=True,
                                 non_informative_categories=True, outliers=False, 
-                                redundant_features=True):
+                                redundant_features=True, placeholders=True,
+                                temporal_features=True,sparse_categories=True,
+                                sparse_values=True, high_cardinality=True,
+                                poor_distribution=False, high_noise=False):
         """
         Identify irrelevant features based on...
 
         Causes for removal:
-        Highly correlated features
-        Irrelavant Features(nothing to do with target value)
+            Tasks for AI/ML:
+                Irrelavant Features(nothing to do with target value)
         *Duplicate Features
-        Features with high missing values (e.g more than 50%)
-        Outliers
-        Non-informative categorical features
-        Features with high noise levels
-        Redundant features
-        Features with irrelevant units
-        Temporal Features with no predictive power
-        Features with high cardinality
-        Features with poor distribution
-        Domain Knowledge
-
+        *Features with high missing values (e.g more than 50%)
+        *Non-informative categorical features
+        *Redundant features
+        *Temporal Features with no predictive power ToDo:needs enhanceing
+        *Features with high cardinality
+            Done:
+                Outliers
+                Features with poor distribution
+                Features with high noise levels
         
         Parameters:
         - threshold: The variance threshold below which features are considered irrelevant.
@@ -152,16 +161,42 @@ class CSVCleaner:
         else:
             feature = self.data[column]
 
+
         #check for non-informative categorical features (IDs/unique identifiers)
         if non_informative_categories and self.non_informative_categorical_feature(feature):
             return True
+        
+        #Check for very noisy data (e.g large Na )
+        if sparse_values and CSVFeatureAnalyzer.feature_has_sparse_values(data):
+            return True
+        
+        if CSVFeatureAnalyzer.feature_is_temporal(data) and temporal_features:
+            return True
+        
+        if placeholders and CSVFeatureAnalyzer.feature_includes_placeholders(data):
+            return True
 
-        if outliers:
-            pass
+        if CSVFeatureAnalyzer.feature_has_sparse_categories(data) and sparse_categories:
+            return True
+
+        if high_cardinality and CSVFeatureAnalyzer.feature_has_high_cardinality(data):
+            return True
+
+        # Check for outliers
+        if CSVFeatureAnalyzer.feature_has_outliers(data) and outliers:
+            return True
+        
+        # Check for poor distribution
+        if poor_distribution and CSVFeatureAnalyzer.feature_has_poor_distribution(data):
+            return True
+        
+        # Check for high noise
+        if high_noise and CSVFeatureAnalyzer.feature_has_high_noise(data):
+            return True
 
         #Check for redundant features (duplicates)
         if redundant_features:
-                # Get the index of the specified column
+            # Get the index of the specified column
             column_index = self.data.columns.get_loc(feature)
             other_columns = self.data.iloc[:, column_index + 1:]  
             if CSVFeatureAnalyzer.feature_is_redundant(feature,other_columns):
