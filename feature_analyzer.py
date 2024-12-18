@@ -1,9 +1,13 @@
 import pandas as pd
 import re
+from sklearn.ensemble import IsolationForest
+
+
+import numpy as np
 
 class CSVFeatureAnalyzer:
 
-    def feature_has_outliers(self, data, threshold=1.5, outlier_percentage_threshold=0.1):
+    def feature_has_too_many_outliers(data, threshold=1.5, outlier_percentage_threshold=0.1):
         """
         Check for outliers using the IQR method and return True if the number of outliers exceeds the specified percentage of the data.
         
@@ -36,14 +40,41 @@ class CSVFeatureAnalyzer:
         
         return False
 
-    def feature_has_poor_distribution(self, data, skew_threshold=1):
+    def feature_is_datetime_related(column_name, data):
+        """
+        Check if a column is likely to be datetime-related based on its name and sample data.
+
+        Args:
+            column_name (str): The name of the column.
+            sample_data (pd.Series): A sample of the data in the column.
+
+        Returns:
+            bool: True if the column is likely datetime-related, False otherwise.
+        """
+        # Check if the data is numeric
+        if pd.api.types.is_numeric_dtype(data):
+            return False  # Numeric values should not be considered datetime-related
+        
+        # Check for common keywords in the column name
+        datetime_keywords = ['date', 'time', 'timestamp']
+        if any(keyword in column_name.lower() for keyword in datetime_keywords):
+            return True
+
+        # Check if the sample data can be converted to datetime
+        try:
+            pd.to_datetime(data, errors='raise')
+            return True
+        except (ValueError, TypeError):
+            return False
+
+    def feature_has_poor_distribution( data, skew_threshold=1):
         """Check for features with poor distribution based on skewness."""
         if pd.api.types.is_numeric_dtype(data):
             skewness = data.skew()
             return abs(skewness) > skew_threshold
         return False
 
-    def feature_has_high_noise(self, data, noise_threshold=0.1):
+    def feature_has_high_noise(data, noise_threshold=0.1):
         """Check for features with high noise levels based on standard deviation."""
         if pd.api.types.is_numeric_dtype(data):
             std_dev = data.std()
@@ -53,26 +84,27 @@ class CSVFeatureAnalyzer:
     
 
 
-    def feature_has_constant_values(self, data):
+    def feature_has_constant_values( data):
         """Check for constant features with only one unique value."""
         return len(data.unique()) <= 1
 
-    def feature_has_high_cardinality(self, data, threshold=0.9):
+    def feature_has_high_cardinality(data, threshold=0.9):
         """Check for high cardinality features (e.g., many unique values)."""
         unique_ratio = len(data.unique()) / len(data)
         return unique_ratio > threshold
 
-    def feature_has_sparse_categories(self, data, min_frequency=2):
-        """Check for sparse categories with very few occurrences."""
-        value_counts = data.value_counts()
-        return (value_counts < min_frequency).sum() > 0
 
-    def feature_includes_placeholders(self, data):
+    # def feature_has_sparse_categories( data, min_frequency=2):
+    #     """Check for sparse categories with very few occurrences."""
+    #     value_counts = data.value_counts()
+    #     return (value_counts < min_frequency).sum() > 0
+
+    def feature_includes_placeholders(data):
         """Check for placeholder or dummy variables."""
         common_placeholders = ["unknown", "n/a", "none", "placeholder"]
         return data.astype(str).str.lower().isin(common_placeholders).mean() > 0.5
 
-    def feature_is_temporal(self, data):
+    def feature_is_temporal(data):
         """Check for features containing date or timestamp-like data."""
         try:
             pd.to_datetime(data)
@@ -80,15 +112,15 @@ class CSVFeatureAnalyzer:
         except (ValueError, TypeError):
             return False
 
-    def feature_is_redundant(self, data, other_columns):
+    def feature_is_redundant(original_data, data, other_columns):
         """Check for redundancy by comparing with other columns."""
-        return any(data.equals(self.data[col]) for col in other_columns if col != data.name)
+        return any(data.equals(original_data[col]) for col in other_columns if col != data.name)
 
-    def feature_has_sparse_values(self, data):
+    def feature_has_sparse_values( data):
         """Check for sparse features with mostly missing or empty values."""
         return data.isna().mean() > 0.5
 
-    def feature_is_phone_number(self, data):
+    def feature_is_phone_number( data):
         """Identify columns that may contain phone numbers."""
 
         # Check if column contains mostly numeric data or has phone-like patterns
@@ -98,7 +130,7 @@ class CSVFeatureAnalyzer:
             return match_count / len(data) > 0.8  # Threshold: 80% matches indicate phone numbers
         return False
 
-    def feature_is_zip_codes(self, data):
+    def feature_is_zip_codes( data):
         """
         Enhanced ZIP code check for large datasets.
         Parameters:
@@ -130,38 +162,73 @@ class CSVFeatureAnalyzer:
         return False
 
 
-    def feature_is_unique_Id(self, data, uniqueness_threshold=0.9, duplicate_threshold=0.1):
+    def feature_is_unique_Id(data, uniqueness_threshold=0.9, duplicate_threshold=0.1):
         """
         Identify columns that are likely to be IDs or unique identifiers.
 
         Args:
-            df (pd.DataFrame): The dataset to analyze.
+            data (pd.Series): A single column of the dataset to analyze.
             uniqueness_threshold (float): The minimum proportion of unique values required (default: 0.9).
             duplicate_threshold (float): The maximum proportion of duplicate values allowed (default: 0.1).
 
         Returns:
-            list: Columns identified as potential IDs.
+            bool: True if the column is identified as a potential ID, False otherwise.
         """
-            
+        # Ensure input is a pandas Series
+        if not isinstance(data, pd.Series):
+            raise TypeError("Input must be a pandas Series.")
+
+        # Handle empty Series
+        if data.empty:
+            return False  # An empty Series cannot be a unique ID
+
         # Calculate the proportion of unique values
         unique_ratio = data.nunique() / len(data)
-        
+
         # Calculate the proportion of duplicate values
         duplicate_ratio = 1 - unique_ratio
 
-        # Check if the column is numeric and spans a meaningful range
-        if pd.api.types.is_numeric_dtype(data):
+        # Check if the column is numeric
+        is_numeric = pd.api.types.is_numeric_dtype(data)
+
+        # Additional numeric checks for meaningful range and patterns
+        if is_numeric:
             meaningful_range = data.max() - data.min() > 1e-5
+            is_integer_like = np.array_equal(data, data.astype(int))  # Check if values are integer-like
+            
         else:
             meaningful_range = False
+            is_integer_like = False
+
+        # Additional checks for potential patterns in string data
+        if pd.api.types.is_string_dtype(data):
+            # Check if all values follow a pattern like UUID, alphanumeric, etc.
+            string_pattern_consistent = all(data.str.match(r"^[A-Za-z0-9\-_]+$").fillna(False))
+        else:
+            string_pattern_consistent = False
 
         # Conditions for identifying an ID
-        if (
+        is_potential_id = (
             unique_ratio >= uniqueness_threshold  # Mostly unique values
             and duplicate_ratio <= duplicate_threshold  # Low duplicates
-            and not meaningful_range  # Exclude numeric columns with a meaningful range
-        ):
-            return True
-        else:
-            return False
-        
+            and (
+                (not is_numeric)  # Non-numeric data
+                or (is_numeric and not meaningful_range and is_integer_like)  # Integer-like numeric data with no meaningful range
+                or (pd.api.types.is_string_dtype(data) and string_pattern_consistent)  # String data must match the pattern
+            )
+            and (not is_numeric or not meaningful_range)  # Exclude numeric with meaningful range
+        )
+
+        return is_potential_id
+
+
+    def feature_has_outliers_ml(data, contamination=0.1):
+        """Detect outliers using Isolation Forest."""
+        if pd.api.types.is_numeric_dtype(data):
+            model = IsolationForest(contamination=contamination)
+            outliers = model.fit_predict(data.values.reshape(-1, 1))
+            return (outliers == -1).sum() > (len(data) * contamination)
+        return False
+
+
+    
