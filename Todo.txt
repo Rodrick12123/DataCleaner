@@ -1,11 +1,15 @@
 Target Areas for Data Cleaning
-Outlier Detection and Treatment: Identify and handle outliers in numerical columns.(completely remove or change to mean)
 
-Data Type Conversion: Ensure that columns have the correct data types (e.g., converting strings to dates).
-Normalization/Standardization: Normalize or standardize numerical features for better performance in machine learning models.
-Encoding Categorical Variables: Convert categorical variables into numerical format using techniques like one-hot encoding or label encoding.
-Removing Duplicates: Identify and remove duplicate rows in the dataset.
-Feature Scaling: Scale numerical features to a specific range (e.g., Min-Max scaling).
-Text Cleaning: Clean text data by removing special characters, converting to lowercase, etc.
-Date Handling: Convert date strings to datetime objects and extract useful features (e.g., year, month).
-Feature Engineering: Create new features based on existing ones (e.g., extracting the day of the week from a date).
+find out where to use ML/Transfer Learning/Ai in program
+
+figure out how to use ai to identify categories with similar meanings (Hugging face inference API)
+
+(example usage of API for hugging face)
+API_URL = "https://api-inference.huggingface.co/models/cardiffnlp/twitter-roberta-base-sentiment-latest"
+headers = {"Authorization": "Bearer hf_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"}
+payload = {
+    "inputs": "Today is a great day",
+}
+
+response = requests.post(API_URL, headers=headers, json=payload)
+response.json()
