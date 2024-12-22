@@ -39,33 +39,119 @@ class CSVFeatureAnalyzer:
             return outlier_count > max_allowed_outliers
         
         return False
+    
+    @staticmethod
+    def feature_is_duration_related(column_name, data):
+        """
+        Check if a column is likely duration-related based on its values.
+        Duration-related columns are often differences between dates or times (e.g., '5 days', '3 hours').
+        This function handles both string durations (e.g., '3 hours') and numeric durations (e.g., '142' as hours or minutes).
+        """
+        non_na_data = data.dropna()
 
+        # Sample a few values (ensure we sample only non-NaN values)
+        sample_values = non_na_data.sample(min(10, len(non_na_data)))  # Sample a few values, but no more than the available data
+
+        # Check if any of the values are datetime, which should be excluded for duration check
+        if sample_values.apply(lambda x: isinstance(x, pd.Timestamp)).any():
+            return False  # If any value is a datetime, it's likely date-related
+
+        # Check if the column contains recognizable duration formats (e.g., '5 days', '3 hours', etc.)
+        duration_pattern = r'(\d+)\s*(days?|hours?|minutes?)'  # Pattern for matching durations like "5 days" or "3 hours"
+        if sample_values.apply(lambda x: isinstance(x, str) and bool(re.match(duration_pattern, x.strip()))).any():
+            return True  # Likely duration-related
+        sample_values = pd.to_numeric(sample_values, errors='coerce').dropna()
+        def is_potential_duration(value):
+            if isinstance(value, (int, float)):  # Numeric values
+                return 0 < value < 10000  # Reasonable range for durations (e.g., seconds, minutes, hours)
+            return False
+        if sample_values.empty:
+            return False
+        if sample_values.apply(is_potential_duration).any() :
+            return True  # Likely duration-related if we have numbers in a reasonable range
+
+        # Try to convert values to Timedelta (duration-related)
+        try:
+            pd.to_timedelta(sample_values, errors='raise')
+            return True  # Likely duration-related
+        except (ValueError, TypeError):
+            return False  # Not duration-related
+    
+    def feature_is_date_related(column_name, data):
+        """
+        Check if a column is likely date-related based on its values.
+        Date-related columns represent absolute points in time (e.g., '2024-12-20').
+        """
+        # sample_values = data.sample(min(10, len(data))) 
+        sample_values = data 
+        # Check if any of the values are timedelta, which should be excluded for date check
+        if sample_values.apply(lambda x: isinstance(x, pd.Timedelta)).any():
+            return False  # If any value is a Timedelta, it's likely duration-related
+        
+        # Check for date-like patterns (e.g., '2024-12-20', '1995-02-10', etc.)
+        date_pattern = r'\d{4}-\d{2}-\d{2}'  # Common date format (YYYY-MM-DD)
+        if sample_values.apply(lambda x: isinstance(x, str) and bool(re.match(date_pattern, x.strip()))).any():
+            return True  # Likely date-related
+        
+        try:
+            pd.to_datetime(sample_values, errors='raise')
+            return True  # Likely date-related
+        except (ValueError, TypeError):
+            return False  # Not date-related
+        
     def feature_is_datetime_related(column_name, data):
         """
-        Check if a column is likely to be datetime-related based on its name and sample data.
+        Check if a column is likely to be datetime-related, duration-related, or contain time-related data.
 
         Args:
             column_name (str): The name of the column.
-            sample_data (pd.Series): A sample of the data in the column.
+            data (pd.Series): The data in the column.
 
         Returns:
-            bool: True if the column is likely datetime-related, False otherwise.
+            bool: True if the column is datetime-related or duration-related, False otherwise.
         """
-        # Check if the data is numeric
-        if pd.api.types.is_numeric_dtype(data):
-            return False  # Numeric values should not be considered datetime-related
-        
-        # Check for common keywords in the column name
-        datetime_keywords = ['date', 'time', 'timestamp']
-        if any(keyword in column_name.lower() for keyword in datetime_keywords):
+        # Constants
+        datetime_keywords = ['date', 'time', 'timestamp', 'duration', 'elapsed', 'interval', 'created', 'updated']
+        duration_keywords = ['day', 'hour', 'minute', 'second', 'week', 'month', 'year', 'duration']
+        duration_pattern = r'(\d+\s*(day|hour|minute|second|week|month|year)s?)|(\d+[hms])'
+
+        # Sampling size (10% of data or 10 rows)
+        sample_size = max(1, min(10, len(data)))  # Ensure sample is between 1 and 10 rows
+
+        # Check if the column name contains any common date/time-related keywords
+        for keyword in datetime_keywords:
+            if keyword in column_name.lower():
+                print(f"Date/Time keyword '{keyword}' detected in column name '{column_name}'.")
+                return True
+
+        # Sample the data to inspect the values
+        sample_data = data.sample(min(sample_size, len(data)))
+
+        # Check if the data is numeric, if so, it can't be date/time-related
+        if pd.api.types.is_numeric_dtype(sample_data):
+            return False
+
+        # Convert sample data to string type to safely apply string-based operations
+        sample_data_str = sample_data.astype(str)
+
+        # Try parsing the sample data to datetime using pandas' to_datetime function
+        try:
+            parsed_dates = pd.to_datetime(sample_data_str, errors='coerce')
+            # Check if a significant portion (80%) of the data can be parsed as datetime
+            if parsed_dates.notna().sum() >= 0.8 * len(sample_data):
+                print(f"Datetime detected in column: {column_name}")
+                return True
+        except (ValueError, TypeError):
+            pass  # If conversion fails, continue to the next checks
+
+        # Check for duration-like patterns using regex
+        matching_count = sample_data_str.str.contains(duration_pattern, case=False, regex=True).sum()
+        if matching_count >= 0.8 * len(sample_data):  # Require 80% of samples to match
+            print(f"Duration detected in column: {column_name}")
             return True
 
-        # Check if the sample data can be converted to datetime
-        try:
-            pd.to_datetime(data, errors='raise')
-            return True
-        except (ValueError, TypeError):
-            return False
+        return False
+
 
     def feature_has_poor_distribution( data, skew_threshold=1):
         """Check for features with poor distribution based on skewness."""
@@ -193,9 +279,11 @@ class CSVFeatureAnalyzer:
 
         # Additional numeric checks for meaningful range and patterns
         if is_numeric:
-            meaningful_range = data.max() - data.min() > 1e-5
-            is_integer_like = np.array_equal(data, data.astype(int))  # Check if values are integer-like
-            
+            # Safely filter out non-finite values
+            numeric_data = pd.to_numeric(data, errors='coerce').dropna()
+            numeric_data = numeric_data[np.isfinite(numeric_data)]  # Remove inf/-inf values
+            meaningful_range = numeric_data.max() - numeric_data.min() > 1e-5
+            is_integer_like = np.array_equal(numeric_data, numeric_data.astype(int))  # Check if values are integer-like
         else:
             meaningful_range = False
             is_integer_like = False
@@ -220,6 +308,7 @@ class CSVFeatureAnalyzer:
         )
 
         return is_potential_id
+
 
 
     def feature_has_outliers_ml(data, contamination=0.1):

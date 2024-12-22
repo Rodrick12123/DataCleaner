@@ -4,10 +4,12 @@ from IPython.display import display
 def main():
     # Specify the path to your file
     file_path = "example_data.csv"
+    file_path2 = "messy_IMDB_dataset.csv"
+    file_path3 = "GOOG.csv"
 
     
     # Create an instance of CSVCleaner
-    cleaner = CSVCleaner(file_path)
+    cleaner = CSVCleaner(file_path2)
     
     #Clean data
     
@@ -22,8 +24,7 @@ def main():
     random_samples = cleaned_data.sample(n=10, random_state=10)  # Set random_state for reproducibility
     print("Random Samples from Cleaned Data:")
     display(random_samples)
-    print(cleaner.cols_removed) 
-
+    print(cleaned_data.dtypes) 
 
 
 if __name__ == "__main__":

@@ -9,7 +9,7 @@ from sklearn.preprocessing import LabelEncoder
 from sklearn.feature_extraction.text import TfidfVectorizer
 import matplotlib.pyplot as plt
 from sklearn.cluster import KMeans
-
+import numpy as np
 
 
 
@@ -30,6 +30,7 @@ class CSVCleaner:
         self.percentage_rows_removed = 0
         self.percentage_cols_removed = 0
         self.comment_columns = []
+        self.protected_columns = []
 
     def detect_delimiter(self, file_path):
         """
@@ -71,9 +72,12 @@ class CSVCleaner:
         with open(file_path, 'rb') as f:
             result = chardet.detect(f.read(10000))  # Read the first 10,000 bytes
             encoding = result['encoding']
+            print(f"Detected encoding: {encoding}")
 
+        # Detect the delimiter
         delimiter = self.detect_delimiter(file_path)
-
+        print(f"Detected delimiter: {delimiter}")
+        
         # Try reading the CSV with detected encoding and dynamic delimiter
         try:
             data = pd.read_csv(file_path, encoding=encoding, delimiter=delimiter, on_bad_lines='warn')
@@ -88,6 +92,7 @@ class CSVCleaner:
         if data.empty:
             raise ValueError("The DataFrame is empty after loading the data.")
         
+
         return data
 
     def convert_to_datetime(self, column):
@@ -110,7 +115,8 @@ class CSVCleaner:
 
         # Attempt to convert to datetime
         try:
-            converted_column = pd.to_datetime(column, errors='raise')  # Raise an error for invalid parsing
+            print(f"Converting column '{column}' to datetime format.")
+            converted_column = pd.to_datetime(column, errors='raise')  
             return converted_column
         except ValueError as ve:
             print(f"ValueError: {ve}. Unable to convert the column to datetime.")
@@ -121,8 +127,50 @@ class CSVCleaner:
         except Exception as e:
             print(f"An unexpected error occurred: {e}.")
             return column  # Return the original column if conversion fails
+        
+    def process_datetime_column(self, column_name):
+        negligible_duration = 0
 
-    def analyze_features(self):
+        # Check if the column contains more duration-related or date-related values
+        if CSVFeatureAnalyzer.feature_is_duration_related(column_name, self.data[column_name]):
+            print(f"Majority values in column '{column_name}' are durations (numeric values).")
+            self.data[column_name] = self.data[column_name].apply(
+                lambda x: x.total_seconds() if isinstance(x, pd.Timedelta)  # Convert Timedelta to seconds
+                else pd.to_numeric(x, errors='coerce') if isinstance(x, object)  # Convert object to numeric if possible
+                else x  # Keep numeric values as is (int or float)
+            )
+
+            self.data[column_name] = pd.to_numeric(self.data[column_name], errors='coerce')
+            self.data[column_name].fillna(negligible_duration, inplace=True)
+            
+
+        elif CSVFeatureAnalyzer.feature_is_date_related(column_name, self.data[column_name]):
+            print(f"Majority values in column '{column_name}' are date-time values.")
+
+            negligible_duration = 0  # Value to replace invalid durations or missing values
+
+            first_valid_date = self.data[column_name].dropna().iloc[0]
+            
+            # inferred_format = pd.to_datetime(first_valid_date, errors='coerce')
+
+            self.data[column_name] = pd.to_datetime(self.data[column_name], errors='coerce')
+
+            if self.data[column_name].isnull().any():
+                print(f"Some values in column '{column_name}' could not be converted to datetime.")
+
+                self.data[column_name].fillna(pd.Timestamp('1970-01-01'), inplace=True)
+            
+            #possible encoding step
+            # min_timestamp = self.data[column_name].min()
+            # self.data[column_name] = self.data[column_name].apply(
+            #     lambda x: (x - min_timestamp).total_seconds() if isinstance(x, pd.Timestamp) else negligible_duration
+            # )
+            
+
+        else:
+            print(f"Unable to classify column '{column_name}' as either duration or date-time related.")
+
+    def analyze_features(self, force_remove_column=[]):
         """
         Analyze features in the DataFrame to identify irrelevant features and convert types.
         """
@@ -135,12 +183,17 @@ class CSVCleaner:
             self.feature_object_to_numeric_fillna(column)
 
             if column in self.data.columns:
-                # Make optional
-                if CSVFeatureAnalyzer.feature_is_datetime_related(column, self.data[column].sample(min(10, len(self.data[column])))):
-                    print(f"Converting column '{column}' to datetime format.")
-                    self.data[column] = self.convert_to_datetime(self.data[column])
 
-                if self.is_irrelevant_feature(column):
+                # Make optional
+                if CSVFeatureAnalyzer.feature_is_datetime_related(column, self.data[column]):
+                    
+                    self.process_datetime_column(column)
+                    self.protected_columns.append(column)
+                    
+
+
+
+                if self.is_irrelevant_feature(column, force_remove_column=force_remove_column):
                     irrelevant_features.append(column)
 
         # Call remove features on irrelevant_features
@@ -182,43 +235,95 @@ class CSVCleaner:
         Returns:
             pd.DataFrame: The modified DataFrame.
         """
-        # Check if the feature is meant to be numeric but is stored as an object
+        
+        # Skip numeric conversion for columns not predominantly numeric
         if self.data[column].dtype == 'object':
+            # Skip processing for ID-like columns
+            if "id" in column.lower():
+                print(f"Column '{column}' identified as an ID. Skipping processing.")
+                return self.data
+            
+            if CSVFeatureAnalyzer.feature_is_datetime_related(column, self.data[column]):
+                print(f"Column '{column}' identified as date-time related. Skipping processing.")
+
+                return self.data
+
+            # Drop NaN values and sample the data
+            non_na_data = self.data[column].dropna()
+            sample_size = min(len(non_na_data), 100)  # Limit sample size to 100
+            if sample_size == 0:
+                print(f"Column '{column}' contains only NaN values. Skipping processing.")
+                return self.data
+
+            # Preprocess and check numeric dominance
+            def preprocess_numeric_like(value):
+                """
+                Preprocess values to correct common numerical formatting issues.
+
+                Args:
+                    value (str): The raw input value.
+
+                Returns:
+                    str: The preprocessed string for numeric checks.
+                """
+                if isinstance(value, str):
+                    # Remove currency symbols (e.g., $, €, £) and any whitespace
+                    value = value.replace('$', '').replace('€', '').replace('£', '').strip()
+
+                    # Remove commas (thousands separators)
+                    value = value.replace(',', '')
+
+                    # If there are multiple periods ('.'), treat them as thousands separators
+                    if value.count('.') > 1:
+                        # Split the value by the period
+                        parts = value.split('.')
+                        # Rejoin all parts except the last one (treat as thousands separator), keeping the last part as the decimal point
+                        value = ''.join(parts[:-1]) + '.' + parts[-1]
+                    
+                    # Return the cleaned value
+                    return value
+                
+                return value
+
+            sample = non_na_data.sample(sample_size, random_state=42)
+            preprocessed_sample = sample.apply(preprocess_numeric_like)
+            numeric_proportion = preprocessed_sample.apply(
+                lambda x: bool(re.match(r'^-?\d+(\.\d+)?$', str(x).strip()))
+            ).mean()
+            if numeric_proportion < 0.8:  # Threshold for numeric dominance
+                print(f"Column '{column}' is not predominantly numeric after preprocessing. Skipping processing.")
+                return self.data
+
             # Replace empty strings and strings with only whitespace with NaN
             self.data[column].replace(r'^\s*$', float('nan'), regex=True, inplace=True)
 
-            # Function to extract numeric value from mixed strings
+            # Function to extract numeric values from mixed strings
             def extract_numeric(value):
                 if isinstance(value, str):
-                    # Remove dollar sign and any other currency symbols
-                    value = value.replace('$', '').replace('€', '').replace('£', '')  # Add more symbols as needed
+                    value = value.replace('$', '').replace('€', '').replace('£', '').replace(',', '').strip()
+                    if value.count('.') > 1:
+                        parts = value.split('.')
+                        value = ''.join(parts[:-1]) + '.' + parts[-1]
+                    try:
+                        return float(value)
+                    except ValueError:
+                        return float('nan')  # Return NaN for non-convertible strings
+                return value
 
-                    # Check if the string is an ID (contains letters and numbers)
-                    if re.match(r'^\d+-[A-Z0-9]+$', value):
-                        return value  # Return as is if it's an ID
-                    # Use regex to find all numbers in the string
-                    match = re.findall(r'\d+\.?\d*', value)  # Matches integers and decimals
-                    if match:
-                        try:
-                            return float(match[0])  # Convert the first match to float
-                        except ValueError:
-                            return value 
-                return value 
-            
             # Apply the extraction function to the column
             self.data[column] = self.data[column].apply(extract_numeric)
 
+            # Attempt to convert the entire column to numeric
             try:
-                # Attempt to convert to numeric
                 self.data[column] = pd.to_numeric(self.data[column], errors='raise')
             except ValueError:
-                # If conversion fails, it indicates the feature is not numeric
-                return self.data            
+                print(f"Column '{column}' is not numeric after processing.")
+                return self.data
 
         # Calculate the percentage of missing values
         missing_percentage = self.data[column].isna().mean()
 
-        # Check if the missing percentage exceeds the threshold
+        # Handle missing values or remove the column if necessary
         if missing_percentage > threshold:
             print(f"Column '{column}' has {missing_percentage * 100:.2f}% missing values. Removing the column.")
             self.data.drop(columns=[column], inplace=True)
@@ -233,7 +338,7 @@ class CSVCleaner:
             mode_value = self.data[column].mode()[0]  # Get the first mode
             self.data[column].fillna(mode_value, inplace=True)
 
-        return self.data 
+        return self.data
 
     def non_informative_categorical_feature(self, data):
         """
@@ -261,7 +366,8 @@ class CSVCleaner:
                                 redundant_features=True, placeholders=True,
                                 temporal_features=False,
                                 sparse_values=True, high_cardinality=False,
-                                poor_distribution=False, high_noise=False):
+                                poor_distribution=False, high_noise=False,
+                                force_remove_column=[]):
         """
         Identify irrelevant features based on various criteria.
         
@@ -282,6 +388,23 @@ class CSVCleaner:
         Returns:
             bool: True if the feature is irrelevant.
         """
+        # Automatically remove columns in force_remove_column
+        if column in force_remove_column:
+            print(f"Column '{column}' is marked for removal.")
+            return True
+        
+        # Protect columns in protected_columns
+        if column in self.protected_columns:
+            if not self.data[column].empty and self.data[column].nunique(dropna=True) > 1:
+                        
+                print(f"Column '{column}' is protected and will not be removed.")
+                return False
+            else:
+                if not self.data[column].empty:
+                    print(f"Column '{column}' is overrided, because {column} is empty.")
+                elif self.data[column].nunique(dropna=True) > 1:
+                    print(f"Column '{column}' is overrided, because {column} has constant values.")
+
         if len(self.data) > 1e5:  # Arbitrary threshold for large datasets
             data = self.data.sample(frac=sample_fraction, random_state=42)
             feature = data[column]
@@ -329,6 +452,7 @@ class CSVCleaner:
             return True
 
         return False
+
 
     def remove_irrelevant_features(self, irrelevant_features):
         """
@@ -471,84 +595,102 @@ class CSVCleaner:
         Returns:
             pd.DataFrame: The modified DataFrame with extracted datetime features.
         """
-        for column in self.data.select_dtypes(include=['object']).columns:
-            # Check if the column is likely to be datetime-related
-            if CSVFeatureAnalyzer.feature_is_datetime_related(column, self.data[column].sample(min(10, len(self.data[column])))):
-                negligible_duration = pd.Timedelta(seconds=0)  # or use pd.Timestamp('1970-01-01') if you prefer a date
+        for column in self.data.columns:
+            # Skip columns that are already datetime-like (datetime64[ns])
+            if self.data[column].dtype == 'datetime64[ns]':
+                print(f"Column '{column}' is already in datetime format.")
+                # Directly extract datetime components if it's already datetime-like
+                self._encode_datetime_components(column)
+                continue  # Skip to next column
 
-                # Replace problematic values with the negligible duration
-                self.data[column] = self.data[column].replace(
-                    to_replace=[None, 'Nan', 'Inf', 'Not Applicable', '-', ''],  # List of values to replace
-                    value=negligible_duration
-                )
+            # # Check if the column is likely to be datetime-related
+            # if CSVFeatureAnalyzer.feature_is_datetime_related(column, self.data[column]):
+            #     negligible_duration = pd.Timedelta(seconds=0)
 
-                self.data[column] = pd.to_numeric(self.data[column], errors='coerce')
+            #     # Replace problematic values with the negligible duration
+            #     self.data[column] = self.data[column].replace(
+            #         to_replace=[None, 'Nan', 'Inf', 'Not Applicable', '-', ''],  # List of values to replace
+            #         value=negligible_duration
+            #     )
 
-                # Optionally, handle remaining NaN values (e.g., replace with negligible duration)
-                self.data[column].fillna(negligible_duration, inplace=True)
+            #     # Convert non-numeric entries to NaT, and then numeric entries to the correct datetime
+            #     self.data[column] = pd.to_datetime(self.data[column], errors='coerce')
 
-                self.data[column] = pd.to_datetime(self.data[column], errors='coerce')
+            #     # Handle remaining NaN values (e.g., replace with negligible duration)
+            #     self.data[column].fillna(negligible_duration, inplace=True)
 
-                # Check for conversion issues
-                if self.data[column].isnull().all():
-                    print(f"Warning: All values in column '{column}' could not be converted to datetime. Keeping original values.")
-                    continue  # Skip to the next column if conversion fails
+            #     # Check for conversion issues
+            #     if self.data[column].isnull().all():
+            #         print(f"Warning: All values in column '{column}' could not be converted to datetime. Keeping original values.")
+            #         continue  # Skip to the next column if conversion fails
 
-                # Log how many values were converted successfully
-                successful_conversions = self.data[column].notnull().sum()
-                print(f"Converted {successful_conversions} values in column '{column}' to datetime.")
+            #     # Log how many values were converted successfully
+            #     successful_conversions = self.data[column].notnull().sum()
+            #     print(f"Converted {successful_conversions} values in column '{column}' to datetime.")
 
-                # Check for non-zero entries before creating new columns
-                year_values = self.data[column].dt.year
-                month_values = self.data[column].dt.month
-                day_values = self.data[column].dt.day
-                hour_values = self.data[column].dt.hour
-                minute_values = self.data[column].dt.minute
-                second_values = self.data[column].dt.second
-                dayofweek_values = self.data[column].dt.dayofweek  # Monday=0, Sunday=6
-                
-                num_added_columns = 0
+            #     # Now encode the datetime components like year, month, day, etc.
+            #     self._encode_datetime_components(column)
 
-                # Create new columns only if there is more than 1 unique value (excluding NaN)
-                if year_values.nunique(dropna=True) > 1:
-                    self.data[f'{column}_year'] = year_values.fillna(0).astype(int)
-                    num_added_columns += 1
-                if month_values.nunique(dropna=True) > 1:
-                    self.data[f'{column}_month'] = month_values.fillna(0).astype(int)
-                    num_added_columns += 1
-                if day_values.nunique(dropna=True) > 1:
-                    self.data[f'{column}_day'] = day_values.fillna(0).astype(int)
-                    num_added_columns += 1
-                if hour_values.nunique(dropna=True) > 1:
-                    self.data[f'{column}_hour'] = hour_values.fillna(0).astype(int)
-                    num_added_columns += 1
-                if minute_values.nunique(dropna=True) > 1:
-                    self.data[f'{column}_minute'] = minute_values.fillna(0).astype(int)
-                    num_added_columns += 1
-                if second_values.nunique(dropna=True) > 1:
-                    self.data[f'{column}_second'] = second_values.fillna(0).astype(int)
-                    num_added_columns += 1
-                if dayofweek_values.nunique(dropna=True) > 1:
-                    self.data[f'{column}_dayofweek'] = dayofweek_values.fillna(0).astype(int)
-                    num_added_columns += 1
-
-                if num_added_columns > 0:
-                    # Check for NaN values in the new columns
-                    for new_col in [f'{column}_year', f'{column}_month', f'{column}_day', f'{column}_hour', f'{column}_minute', f'{column}_second', f'{column}_dayofweek']:
-                        if new_col in self.data.columns:
-                            nan_count = self.data[new_col].isnull().sum()
-                            total_count = len(self.data[new_col])
-                            
-                            if nan_count > 0:
-                                nan_percentage = (nan_count / total_count) * 100
-                                print(f"Warning: Column '{new_col}' has {nan_count} NaN values ({nan_percentage:.2f}%). This indicates conversion issues.")
-
-                    # Optionally drop the original column if desired
-                    self.data.drop(columns=[column], inplace=True)
-
-                    print(f"Processed and encoded datetime features from column '{column}'.")
+            # else:
+            #     print(f"Column '{column}' is not recognized as datetime-related.")
 
         return self.data  # Return the modified DataFrame after processing all columns
+
+
+    def _encode_datetime_components(self, column):
+        """
+        Encodes datetime features by extracting individual components such as year, month, day, etc.
+        Adds new columns for each component.
+        """
+        # Extract datetime components
+        year_values = self.data[column].dt.year
+        month_values = self.data[column].dt.month
+        day_values = self.data[column].dt.day
+        hour_values = self.data[column].dt.hour
+        minute_values = self.data[column].dt.minute
+        second_values = self.data[column].dt.second
+        dayofweek_values = self.data[column].dt.dayofweek  # Monday=0, Sunday=6
+
+        num_added_columns = 0
+
+        # Create new columns only if there is more than 1 unique value (excluding NaN)
+        if year_values.nunique(dropna=True) > 1:
+            self.data[f'{column}_year'] = year_values.fillna(0).astype(int)
+            num_added_columns += 1
+        if month_values.nunique(dropna=True) > 1:
+            self.data[f'{column}_month'] = month_values.fillna(0).astype(int)
+            num_added_columns += 1
+        if day_values.nunique(dropna=True) > 1:
+            self.data[f'{column}_day'] = day_values.fillna(0).astype(int)
+            num_added_columns += 1
+        if hour_values.nunique(dropna=True) > 1:
+            self.data[f'{column}_hour'] = hour_values.fillna(0).astype(int)
+            num_added_columns += 1
+        if minute_values.nunique(dropna=True) > 1:
+            self.data[f'{column}_minute'] = minute_values.fillna(0).astype(int)
+            num_added_columns += 1
+        if second_values.nunique(dropna=True) > 1:
+            self.data[f'{column}_second'] = second_values.fillna(0).astype(int)
+            num_added_columns += 1
+        if dayofweek_values.nunique(dropna=True) > 1:
+            self.data[f'{column}_dayofweek'] = dayofweek_values.fillna(0).astype(int)
+            num_added_columns += 1
+
+        if num_added_columns > 0:
+            # Check for NaN values in the new columns
+            for new_col in [f'{column}_year', f'{column}_month', f'{column}_day', f'{column}_hour', f'{column}_minute', f'{column}_second', f'{column}_dayofweek']:
+                if new_col in self.data.columns:
+                    nan_count = self.data[new_col].isnull().sum()
+                    total_count = len(self.data[new_col])
+                    
+                    if nan_count > 0:
+                        nan_percentage = (nan_count / total_count) * 100
+                        print(f"Warning: Column '{new_col}' has {nan_count} NaN values ({nan_percentage:.2f}%). This indicates conversion issues.")
+
+            # Optionally drop the original column if desired
+            self.data.drop(columns=[column], inplace=True)
+
+            print(f"Processed and encoded datetime features from column '{column}'.")
 
     def detect_and_treat_outliers(self, method='remove'):
         """
@@ -592,10 +734,17 @@ class CSVCleaner:
         text_columns = self.data.select_dtypes(include=['object']).columns  # Identify text columns
         
         for column in text_columns:
-            # Remove special characters and convert to lowercase
-            self.data[column] = self.data[column].str.replace(f"[{string.punctuation}]", "", regex=True)  # Remove punctuation
-            self.data[column] = self.data[column].str.lower()  # Convert to lowercase
-            print(f"Cleaned text data in column: {column}")
+            
+            
+            
+            # Check if the column contains string-like data and is not numeric
+            if not pd.api.types.is_numeric_dtype(self.data[column]):
+                # Remove special characters and convert to lowercase
+                self.data[column] = self.data[column].str.replace(f"[{string.punctuation}]", "", regex=True)  # Remove punctuation
+                self.data[column] = self.data[column].str.lower()  # Convert to lowercase
+                print(f"Cleaned text data in column: {column}")
+            else:
+                print(f"Skipped cleaning for column: {column} as it does not contain string data or is numeric.")
 
     def identify_text_columns(self):
         """
@@ -699,7 +848,7 @@ class CSVCleaner:
         self.encode_categorical_features()
         self.normalize_numerical_features()
 
-    def run(self, preprocess=True):
+    def run(self, preprocess=False):
         """
         Run the data cleaning process.
         
@@ -714,6 +863,7 @@ class CSVCleaner:
         #self.detect_and_treat_outliers(method='remove')  
 
         #Analyze dataset
+        
         # Check if user wishes to preprocess
         if preprocess:
             self.preprocess()
