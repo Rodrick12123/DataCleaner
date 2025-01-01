@@ -6,10 +6,11 @@ def main():
     file_path = "example_data.csv"
     file_path2 = "messy_IMDB_dataset.csv"
     file_path3 = "GOOG.csv"
+    file_path4 = "hotel_bookings.csv"
 
     
     # Create an instance of CSVCleaner
-    cleaner = CSVCleaner(file_path2)
+    cleaner = CSVCleaner(file_path4)
     
     #Clean data
     

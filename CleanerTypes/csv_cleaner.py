@@ -545,47 +545,47 @@ class CSVCleaner:
 
     def encode_categorical_features(self):
         """Encode categorical features dynamically based on their characteristics."""
-        total_samples = self.data.shape[0]  # Total number of samples (rows)
+        total_samples = self.data.shape[0]
 
         # Loop through all categorical columns
         for column in self.data.select_dtypes(include=['object']).columns:
             if column not in self.comment_columns:
-                # Call the clustering function to combine similar values(In need of fix)
-                #self.cluster_similar_values(column)  
+                unique_values = self.data[column].nunique()
+                total_categories = unique_values
                 
-                # After clustering, update unique values
-                unique_values = self.data[column].unique()
-                print(f"Processing column: {column} with unique values: {unique_values}")
-
-                # Convert all values to string to avoid mixed type issues
+                low_cardinality_threshold = min(10, int(0.05 * total_samples))  
+                high_cardinality_threshold = min(50, int(0.2 * total_samples))  
+                
+                print(f"Processing column: {column} with {total_categories} unique values")
+                
+                # Convert to string to handle mixed types
                 self.data[column] = self.data[column].astype(str)
 
-                # Determine thresholds dynamically
-                low_cardinality_threshold = max(5, int(0.05 * total_samples))  # Minimum of 5 unique values
-                high_cardinality_threshold = min(70, total_samples)  # Maximum of 70 unique values
-
-                if len(unique_values) <= low_cardinality_threshold:
-                    # One-Hot Encoding for low cardinality features
-                    self.data = pd.get_dummies(self.data, columns=[column], drop_first=True)
-                    print(f"One-hot encoded column: {column}")
-
-                elif len(unique_values) <= high_cardinality_threshold:
-                    # Label Encoding for medium cardinality features
+                if total_categories <= low_cardinality_threshold:
+                    # One-Hot Encoding for very low cardinality 
+                    self.data = pd.get_dummies(self.data, columns=[column], drop_first=True, dtype=int)  # Added dtype=int
+                    print(f"One-hot encoded column: {column} ({total_categories} categories)")
+                    
+                elif total_categories <= high_cardinality_threshold:
+                    # Label Encoding for medium cardinality
                     le = LabelEncoder()
                     self.data[column] = le.fit_transform(self.data[column])
-                    print(f"Label encoded column: {column}")
-
+                    print(f"Label encoded column: {column} ({total_categories} categories)")
+                    
                 else:
-                    # Dynamically determine top_n for high cardinality features
-                    top_n = max(5, min(int(0.2 * len(unique_values)), 50))  # Keep top 20% of unique categories
-                    top_categories = self.data[column].value_counts().nlargest(top_n).index
-                    self.data[column] = self.data[column].where(self.data[column].isin(top_categories), other='Other')
-                    self.data = pd.get_dummies(self.data, columns=[column], drop_first=True)
-                    print(f"Limited one-hot encoded column: {column} with top {top_n} categories.")
+                    # Limited One-Hot Encoding for high cardinality
+                    value_counts = self.data[column].value_counts()
+                    coverage_threshold = 0.95  # Capture 95% of the data
+                    cumulative_coverage = (value_counts.cumsum() / len(self.data))
+                    top_n = min(len(cumulative_coverage[cumulative_coverage <= coverage_threshold]) + 1, 50)
+                    
+                    top_categories = value_counts.nlargest(top_n).index
+                    self.data[column] = self.data[column].where(self.data[column].isin(top_categories), 'Other')
+                    self.data = pd.get_dummies(self.data, columns=[column], drop_first=True, dtype=int)  # Added dtype=int
+                    print(f"Limited one-hot encoded column: {column} (kept top {top_n} categories)")
 
         # Ensure all features are numeric
         self.data = self.data.apply(pd.to_numeric, errors='ignore')
-
         print("Encoded categorical features.")
 
     def preprocess_and_encode_datetime(self):
@@ -843,12 +843,13 @@ class CSVCleaner:
         # Preprocessing steps
         self.preprocess_and_encode_datetime()
         
+        
         self.encode_text_data()
 
         self.encode_categorical_features()
         self.normalize_numerical_features()
 
-    def run(self, preprocess=False):
+    def run(self, preprocess=True):
         """
         Run the data cleaning process.
         
