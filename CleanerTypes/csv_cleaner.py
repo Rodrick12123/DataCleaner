@@ -10,7 +10,7 @@ from .base_cleaner import BaseCleaner
 
 
 class CSVCleaner(BaseCleaner):
-    def __init__(self, file_path):
+    def __init__(self, file_path,data=None):
         super().__init__()
         """
         Initialize the CSVCleaner with the file path and load the data.
@@ -19,7 +19,12 @@ class CSVCleaner(BaseCleaner):
             file_path (str): The path to the CSV file to be cleaned.
         """
         self.file_path = file_path
-        self.data = self.load_data(file_path)
+        if data is None:
+            
+            self.data = self.load_data(file_path)
+        else:
+            
+            self.data = data
         self.init_number_rows = len(self.data)
         self.init_number_cols = self.data.shape[1]
         
@@ -124,14 +129,16 @@ class CSVCleaner(BaseCleaner):
         Args:
             preprocess (bool): Whether to preprocess the data after cleaning.
         """
+        
         # Analyze dataset
         self.remove_rows_with_high_nan_percentage()
         
         self.analyze_features()
+        
         self.remove_duplicates()
         self.clean_text_data()
         #self.detect_and_treat_outliers(method='remove')  
-
+        
         #Analyze dataset
         
         # Check if user wishes to preprocess

@@ -279,11 +279,18 @@ class FeatureAnalyzer:
 
         # Additional numeric checks for meaningful range and patterns
         if is_numeric:
-            # Safely filter out non-finite values
-            numeric_data = pd.to_numeric(data, errors='coerce').dropna()
-            numeric_data = numeric_data[np.isfinite(numeric_data)]  # Remove inf/-inf values
-            meaningful_range = numeric_data.max() - numeric_data.min() > 1e-5
-            is_integer_like = np.array_equal(numeric_data, numeric_data.astype(int))  # Check if values are integer-like
+            try:
+                # Safely filter out non-finite values
+                numeric_data = pd.to_numeric(data, errors='coerce').dropna()
+                if len(numeric_data) > 0:
+                    meaningful_range = float(numeric_data.max() - numeric_data.min()) > 1e-5
+                    is_integer_like = (numeric_data % 1 == 0).all()  # Check if all values are integers
+                else:
+                    meaningful_range = False
+                    is_integer_like = False
+            except:
+                meaningful_range = False
+                is_integer_like = False
         else:
             meaningful_range = False
             is_integer_like = False
