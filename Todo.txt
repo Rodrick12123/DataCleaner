@@ -1,15 +1,6 @@
-Target Areas for Data Cleaning
 
-find out where to use ML/Transfer Learning/Ai in program
+Test excel_cleaner and csv_cleaner on variety of datasets
 
-figure out how to use ai to identify categories with similar meanings (Hugging face inference API)
+begin organizing the flow for website manipulation
 
-(example usage of API for hugging face)
-API_URL = "https://api-inference.huggingface.co/models/cardiffnlp/twitter-roberta-base-sentiment-latest"
-headers = {"Authorization": "Bearer hf_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"}
-payload = {
-    "inputs": "Today is a great day",
-}
-
-response = requests.post(API_URL, headers=headers, json=payload)
-response.json()
+Begin working on the front end using .Net and react

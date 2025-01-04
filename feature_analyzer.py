@@ -3,9 +3,10 @@ import re
 from sklearn.ensemble import IsolationForest
 
 
+
 import numpy as np
 
-class CSVFeatureAnalyzer:
+class FeatureAnalyzer:
 
     def feature_has_too_many_outliers(data, threshold=1.5, outlier_percentage_threshold=0.1):
         """
@@ -40,7 +41,7 @@ class CSVFeatureAnalyzer:
         
         return False
     
-    @staticmethod
+    
     def feature_is_duration_related(column_name, data):
         """
         Check if a column is likely duration-related based on its values.
@@ -59,16 +60,16 @@ class CSVFeatureAnalyzer:
         # Check if the column contains recognizable duration formats (e.g., '5 days', '3 hours', etc.)
         duration_pattern = r'(\d+)\s*(days?|hours?|minutes?)'  # Pattern for matching durations like "5 days" or "3 hours"
         if sample_values.apply(lambda x: isinstance(x, str) and bool(re.match(duration_pattern, x.strip()))).any():
-            return True  # Likely duration-related
+            return True  
         sample_values = pd.to_numeric(sample_values, errors='coerce').dropna()
         def is_potential_duration(value):
-            if isinstance(value, (int, float)):  # Numeric values
+            if isinstance(value, (int, float)):  
                 return 0 < value < 10000  # Reasonable range for durations (e.g., seconds, minutes, hours)
             return False
         if sample_values.empty:
             return False
         if sample_values.apply(is_potential_duration).any() :
-            return True  # Likely duration-related if we have numbers in a reasonable range
+            return True  
 
         # Try to convert values to Timedelta (duration-related)
         try:
@@ -86,16 +87,16 @@ class CSVFeatureAnalyzer:
         sample_values = data 
         # Check if any of the values are timedelta, which should be excluded for date check
         if sample_values.apply(lambda x: isinstance(x, pd.Timedelta)).any():
-            return False  # If any value is a Timedelta, it's likely duration-related
+            return False  
         
         # Check for date-like patterns (e.g., '2024-12-20', '1995-02-10', etc.)
         date_pattern = r'\d{4}-\d{2}-\d{2}'  # Common date format (YYYY-MM-DD)
         if sample_values.apply(lambda x: isinstance(x, str) and bool(re.match(date_pattern, x.strip()))).any():
-            return True  # Likely date-related
+            return True  
         
         try:
             pd.to_datetime(sample_values, errors='raise')
-            return True  # Likely date-related
+            return True  
         except (ValueError, TypeError):
             return False  # Not date-related
         
@@ -112,7 +113,7 @@ class CSVFeatureAnalyzer:
         """
         # Constants
         datetime_keywords = ['date', 'time', 'timestamp', 'duration', 'elapsed', 'interval', 'created', 'updated']
-        duration_keywords = ['day', 'hour', 'minute', 'second', 'week', 'month', 'year', 'duration']
+        #duration_keywords = ['day', 'hour', 'minute', 'second', 'week', 'month', 'year', 'duration']
         duration_pattern = r'(\d+\s*(day|hour|minute|second|week|month|year)s?)|(\d+[hms])'
 
         # Sampling size (10% of data or 10 rows)
@@ -134,7 +135,6 @@ class CSVFeatureAnalyzer:
         # Convert sample data to string type to safely apply string-based operations
         sample_data_str = sample_data.astype(str)
 
-        # Try parsing the sample data to datetime using pandas' to_datetime function
         try:
             parsed_dates = pd.to_datetime(sample_data_str, errors='coerce')
             # Check if a significant portion (80%) of the data can be parsed as datetime
@@ -218,7 +218,7 @@ class CSVFeatureAnalyzer:
 
     def feature_is_zip_codes( data):
         """
-        Enhanced ZIP code check for large datasets.
+        ZIP code check 
         Parameters:
             - data: Pandas Series
             - sample_fraction: Fraction of data to sample for large datasets
@@ -319,5 +319,3 @@ class CSVFeatureAnalyzer:
             return (outliers == -1).sum() > (len(data) * contamination)
         return False
 
-
-    
