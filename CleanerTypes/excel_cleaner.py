@@ -7,7 +7,7 @@ from .base_cleaner import BaseCleaner
 
 
 class ExcelCleaner(BaseCleaner):
-    def __init__(self, file_path, sheet_name=None, header_row=0, rename_unnamed=True):
+    def __init__(self, file_path, sheet_name=None, header_row=0,load_sample=None, rename_unnamed=True):
         super().__init__()
         """
         Initialize the ExcelCleaner with the file path and load the data.
@@ -21,7 +21,11 @@ class ExcelCleaner(BaseCleaner):
         
         self.header_row = header_row
         self.rename_unnamed = rename_unnamed
-        self.data = self.load_data(file_path)
+        if load_sample:
+            self.data = self.load_sample_data()  # Remove file_path parameter
+        else:
+            self.data = self.load_data(file_path)
+        
         self.init_number_rows = len(self.data)
         self.init_number_cols = self.data.shape[1]
         
@@ -107,6 +111,63 @@ class ExcelCleaner(BaseCleaner):
                 na_values=['NA', 'N/A', '', ' '],
                 keep_default_na=True
             )
+            
+            # Handle unnamed columns
+            if self.rename_unnamed:
+                data.columns = self._handle_unnamed_columns(data.columns)
+            
+            # Remove empty rows and columns
+            data = data.dropna(how='all', axis=1).dropna(how='all', axis=0)
+            
+            # Handle duplicate column names
+            if data.columns.duplicated().any():
+                data.columns = self._handle_duplicate_columns(data.columns)
+            
+            return data
+
+        except Exception as e:
+            raise ValueError(f"Error reading Excel file: {e}")
+    
+    def load_sample_data(self, max_rows=10000):
+        """
+        Load the Excel data into a DataFrame with automatic header detection.
+        Limited to max_rows for memory efficiency.
+        
+        Args:
+            file_path (str): Path to the Excel file
+            max_rows (int): Maximum number of rows to load (default: 10000)
+        """
+        if not os.path.isfile(self.file_path):
+            raise FileNotFoundError(f"The file {self.file_path} does not exist.")
+        
+        try:
+            # First, read a sample of rows to detect header
+            sample_data = pd.read_excel(
+                self.file_path,
+                sheet_name=0 if self.sheet_name is None else self.sheet_name,
+                nrows=20,  # Read first 20 rows for analysis
+                header=None
+            )
+            
+            # Detect header row
+            header_row = self._detect_header_row(sample_data)
+            print(f"Detected header row at index: {header_row}")
+            
+            # Read limited number of rows with detected header
+            data = pd.read_excel(
+                self.file_path,
+                sheet_name=0 if self.sheet_name is None else self.sheet_name,
+                header=header_row,
+                nrows=max_rows,  # Limit rows
+                na_values=['NA', 'N/A', '', ' '],
+                keep_default_na=True
+            )
+            
+            # Print information about data loading
+            total_rows = len(data)
+            print(f"Loaded {total_rows:,} rows from Excel file")
+            if total_rows == max_rows:
+                print(f"Note: Data loading was limited to {max_rows:,} rows")
             
             # Handle unnamed columns
             if self.rename_unnamed:
